@@ -153,8 +153,8 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
             if pd.isna(row['ORDER_DETAIL']):
                 continue
                 
-            raw_detail = re.sub(r'advance\s*\d*', '', raw_detail) # Strip advance text
-            raw_detail = re.sub(r'(?<!\d)\s*pcs\b', ' 1pcs', raw_detail) # Fix naked 'pcs'
+            raw_detail = re.sub(r'advance\s*\d*', '', raw_detail)
+            raw_detail = re.sub(r'(?<!\d)\s*pcs\b', ' 1pcs', raw_detail)
             
             parts = re.split(r'(\d+\s*[\W_]*pcs?)', raw_detail)
             current_text = ""
@@ -191,11 +191,8 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
             return int(match.group(1)) if match else 250 if 'advance' in detail else 0
 
         tracker_df['Advance Value'] = tracker_df['Original Order Detail (raw)'].apply(extract_advance)
-        
-        # --- THE FIX: Replace missing dates/empty cells with blank text to prevent Excel errors ---
         tracker_df = tracker_df.fillna("")
         items_df = items_df.fillna("")
-        # ----------------------------------------------------------------------------------------------
 
         # 3. Write native Excel file
         output = io.BytesIO()
@@ -211,15 +208,18 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 price_ws.write(row_num, 0, row_data[0])
                 price_ws.write(row_num, 1, row_data[1])
                 price_ws.write(row_num, 2, row_data[2])
-                price_ws.write(row_num, 3, row_data[3]) # Write confirmed real Cost Price
-                price_ws.write_formula(row_num, 4, f'=C{row_num+1}-D{row_num+1}') # Profit calculation
+                price_ws.write(row_num, 3, row_data[3])
+                price_ws.write_formula(row_num, 4, f'=C{row_num+1}-D{row_num+1}')
             
             # --- SHEET 2: ORDER TRACKER ---
             tracker_ws = workbook.add_worksheet('Order Tracker')
-            tracker_ws.write('P1', 'Delivery Charge')
-            tracker_ws.write('P2', 250)
-            tracker_ws.write('Q1', 'PostEx Charge')
-            tracker_ws.write('Q2', 225)
+            
+            # --- THE FIX: Moved Assumptions to S and T so they don't overwrite P and Q ---
+            tracker_ws.write('S1', 'Delivery Charge')
+            tracker_ws.write('S2', 250)
+            tracker_ws.write('T1', 'PostEx Charge')
+            tracker_ws.write('T2', 225)
+            # -----------------------------------------------------------------------------
             
             t_headers = tracker_df.columns.tolist() + ['Total Selling Price', 'Total Cost', 'Estimated Profit']
             for col_num, data in enumerate(t_headers):
@@ -237,7 +237,9 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 
                 tracker_ws.write_formula(row_num, 14, f"=SUMIF('Order Items'!B:B, {tracking_cell}, 'Order Items'!F:F)")
                 tracker_ws.write_formula(row_num, 15, f"=SUMIF('Order Items'!B:B, {tracking_cell}, 'Order Items'!H:H)")
-                tracker_ws.write_formula(row_num, 16, f'=IF(OR({status_cell}<>"Delivered", {inv_cell}=0), 0, ({inv_cell}+{adv_cell})-P{row_num+1}-$Q$2)')
+                
+                # Formula updated to look at T2 for the PostEx Charge
+                tracker_ws.write_formula(row_num, 16, f'=IF(OR({status_cell}<>"Delivered", {inv_cell}=0), 0, ({inv_cell}+{adv_cell})-P{row_num+1}-$T$2)')
             
             # Dropdowns & Formatting for Tracker
             status_list = ['Delivered', 'Return', 'In Transit', 'Pending', 'Under Review', 'Unbooked', 'Attempted', 'Cancelled']
@@ -249,8 +251,6 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
             
             tracker_ws.conditional_format(f'D2:D{len(tracker_df)+1}', {'type': 'cell', 'criteria': '==', 'value': '"Return"', 'format': red_fmt})
             tracker_ws.conditional_format(f'D2:D{len(tracker_df)+1}', {'type': 'cell', 'criteria': '==', 'value': '"Delivered"', 'format': green_fmt})
-            
-            # Format Invoice Amount column with light green if it equals 0
             tracker_ws.conditional_format(f'J2:J{len(tracker_df)+1}', {'type': 'cell', 'criteria': '==', 'value': 0, 'format': light_green_fmt})
 
             # --- SHEET 3: ORDER ITEMS ---
@@ -274,11 +274,9 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 items_ws.write_formula(row_num, 7, f"=IFERROR(VLOOKUP({prod_cell}, 'Price List'!A:E, 4, FALSE)*{qty_cell}, 0)")
                 items_ws.write_formula(row_num, 8, f"=G{row_num+1}-H{row_num+1}")
                 
-                # Flag bad matches (Confidence < 85)
                 if row_data[4] < 85:
                     items_ws.write(row_num, 3, row_data[3], workbook.add_format({'bg_color': '#FFEB9C'}))
             
-            # Product Dropdown
             items_ws.data_validation(f'D2:D{len(items_df)+1}', {'validate': 'list', 'source': f"='Price List'!$A$2:$A${len(master_data)+1}"})
 
             # --- SHEET 4: SUMMARY ---
