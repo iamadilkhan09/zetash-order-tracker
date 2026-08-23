@@ -192,6 +192,11 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
 
         tracker_df['Advance Value'] = tracker_df['Original Order Detail (raw)'].apply(extract_advance)
         
+        # --- THE FIX: Replace missing dates/empty cells with blank text to prevent Excel errors ---
+        tracker_df = tracker_df.fillna("")
+        items_df = items_df.fillna("")
+        # ----------------------------------------------------------------------------------------------
+
         # 3. Write native Excel file
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
