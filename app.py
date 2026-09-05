@@ -46,7 +46,6 @@ def normalize_text(text):
         text = re.sub(pattern, replacement, text)
     return re.sub(r'\s+', ' ', text).strip()
 
-# Hardcoded master price list matching EXACT confirmed costs
 master_data = [
     ["ZETASH VIP + HAIR COLOR GEL (PUMP)", "Zetash", 1500, 790],
     ["ZETASH VIP + HAIR COLOR GEL (BOTTLE)", "Zetash", 1500, 790],
@@ -143,7 +142,6 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
     with st.spinner("Building live Excel architecture..."):
         raw_df = pd.read_csv(csv_file)
         
-        # 1. Prepare Order Items Data
         order_items = []
         for index, row in raw_df.iterrows():
             order_ref = row['ORDER_REFERENCE_NUMBER']
@@ -181,7 +179,6 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
         
         items_df = pd.DataFrame(order_items)
         
-        # 2. Prepare Order Tracker Data
         tracker_df = raw_df[['ORDER_REFERENCE_NUMBER', 'TRACKING_NUMBER', 'TRANSACTION_DATE', 'MERCHANT_TRANSACTION_STATUS', 'CUSTOMER_NAME', 'CUSTOMER_PHONE', 'CITY_NAME', 'DELIVERY_ADDRESS', 'ORDER_DETAIL', 'INVOICE_PAYMENT', 'ORDER_PICKUP_DATE', 'ORDER_DELIVERY_DATE', 'REVERSAL_DATE']].copy()
         tracker_df.columns = ['Order Ref', 'Tracking # (Link Key)', 'Order Date', 'Status', 'Customer Name', 'Phone', 'Destination City', 'Delivery Address', 'Original Order Detail (raw)', 'Invoice Amount', 'Pickup Date', 'Delivery Date', 'Reversal Date']
         
@@ -194,32 +191,38 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
         tracker_df = tracker_df.fillna("")
         items_df = items_df.fillna("")
 
-        # 3. Write native Excel file
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             workbook = writer.book
             
-            # --- SHEET 1: PRICE LIST ---
+            # --- SHEET 1: PRICE LIST (Now includes Sales Volume) ---
             price_ws = workbook.add_worksheet('Price List')
-            headers = ["Product Name", "Brand", "Selling Price (PKR)", "Cost Price", "Profit per Unit"]
+            headers = ["Product Name", "Brand", "Selling Price (PKR)", "Cost Price", "Profit per Unit", "Total Delivered", "Promo/Free (Delivered)", "Paid Sales (Delivered)"]
             for col_num, data in enumerate(headers):
                 price_ws.write(0, col_num, data)
+            
             for row_num, row_data in enumerate(master_data, 1):
                 price_ws.write(row_num, 0, row_data[0])
                 price_ws.write(row_num, 1, row_data[1])
                 price_ws.write(row_num, 2, row_data[2])
                 price_ws.write(row_num, 3, row_data[3])
                 price_ws.write_formula(row_num, 4, f'=C{row_num+1}-D{row_num+1}')
+                
+                # New Live Quantity Tracking Formulas
+                prod_cell = f'A{row_num+1}'
+                # Total Delivered = Sum of Qty where Product matches AND Order Status is 'Delivered'
+                price_ws.write_formula(row_num, 5, f'=SUMIFS(\'Order Items\'!E:E, \'Order Items\'!D:D, {prod_cell}, \'Order Items\'!J:J, "Delivered")')
+                # Promo/Free = Sum of Qty where Product matches AND Order Status is 'Delivered' AND Invoice = 0
+                price_ws.write_formula(row_num, 6, f'=SUMIFS(\'Order Items\'!E:E, \'Order Items\'!D:D, {prod_cell}, \'Order Items\'!J:J, "Delivered", \'Order Items\'!K:K, 0)')
+                # Paid Sales = Total Delivered - Promo/Free
+                price_ws.write_formula(row_num, 7, f'=F{row_num+1}-G{row_num+1}')
             
             # --- SHEET 2: ORDER TRACKER ---
             tracker_ws = workbook.add_worksheet('Order Tracker')
-            
-            # --- THE FIX: Moved Assumptions to S and T so they don't overwrite P and Q ---
             tracker_ws.write('S1', 'Delivery Charge')
             tracker_ws.write('S2', 250)
             tracker_ws.write('T1', 'PostEx Charge')
             tracker_ws.write('T2', 225)
-            # -----------------------------------------------------------------------------
             
             t_headers = tracker_df.columns.tolist() + ['Total Selling Price', 'Total Cost', 'Estimated Profit']
             for col_num, data in enumerate(t_headers):
@@ -229,7 +232,6 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 for col_num, data in enumerate(row_data):
                     tracker_ws.write(row_num, col_num, data)
                 
-                # Formulas
                 tracking_cell = f'B{row_num+1}'
                 inv_cell = f'J{row_num+1}'
                 adv_cell = f'N{row_num+1}'
@@ -237,11 +239,8 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 
                 tracker_ws.write_formula(row_num, 14, f"=SUMIF('Order Items'!B:B, {tracking_cell}, 'Order Items'!F:F)")
                 tracker_ws.write_formula(row_num, 15, f"=SUMIF('Order Items'!B:B, {tracking_cell}, 'Order Items'!H:H)")
-                
-                # Formula updated to look at T2 for the PostEx Charge
                 tracker_ws.write_formula(row_num, 16, f'=IF(OR({status_cell}<>"Delivered", {inv_cell}=0), 0, ({inv_cell}+{adv_cell})-P{row_num+1}-$T$2)')
             
-            # Dropdowns & Formatting for Tracker
             status_list = ['Delivered', 'Return', 'In Transit', 'Pending', 'Under Review', 'Unbooked', 'Attempted', 'Cancelled']
             tracker_ws.data_validation(f'D2:D{len(tracker_df)+1}', {'validate': 'list', 'source': status_list})
             
@@ -255,7 +254,7 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
 
             # --- SHEET 3: ORDER ITEMS ---
             items_ws = workbook.add_worksheet('Order Items')
-            i_headers = ['Order Ref', 'Tracking #', 'Raw Text Segment', 'Product (dropdown)', 'Qty', 'Selling Price', 'Line Selling Total', 'Line Cost', 'Line Profit']
+            i_headers = ['Order Ref', 'Tracking #', 'Raw Text Segment', 'Product (dropdown)', 'Qty', 'Selling Price', 'Line Selling Total', 'Line Cost', 'Line Profit', 'Order Status (Helper)', 'Invoice Amount (Helper)']
             for col_num, data in enumerate(i_headers):
                 items_ws.write(0, col_num, data)
                 
@@ -268,11 +267,18 @@ if csv_file and st.button("🚀 Generate Formula-Driven Tracker", type="primary"
                 
                 prod_cell = f'D{row_num+1}'
                 qty_cell = f'E{row_num+1}'
+                tracking_cell = f'B{row_num+1}'
                 
                 items_ws.write_formula(row_num, 5, f"=IFERROR(VLOOKUP({prod_cell}, 'Price List'!A:E, 3, FALSE), 0)")
                 items_ws.write_formula(row_num, 6, f"={qty_cell}*F{row_num+1}")
                 items_ws.write_formula(row_num, 7, f"=IFERROR(VLOOKUP({prod_cell}, 'Price List'!A:E, 4, FALSE)*{qty_cell}, 0)")
                 items_ws.write_formula(row_num, 8, f"=G{row_num+1}-H{row_num+1}")
+                
+                # New Helper Formulas for Price List Aggregation
+                # Lookup Status (Col D in Order Tracker)
+                items_ws.write_formula(row_num, 9, f"=IFERROR(VLOOKUP({tracking_cell}, 'Order Tracker'!B:D, 3, FALSE), \"\")")
+                # Lookup Invoice Amount (Col J in Order Tracker)
+                items_ws.write_formula(row_num, 10, f"=IFERROR(VLOOKUP({tracking_cell}, 'Order Tracker'!B:J, 9, FALSE), 0)")
                 
                 if row_data[4] < 85:
                     items_ws.write(row_num, 3, row_data[3], workbook.add_format({'bg_color': '#FFEB9C'}))
